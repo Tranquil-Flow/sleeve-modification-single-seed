@@ -11,8 +11,10 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"errors"
-	"github.com/xx-labs/sleeve/hasher"
 	"math/big"
+
+	"github.com/ethereum/go-ethereum/crypto"
+	"github.com/xx-labs/sleeve/hasher"
 )
 
 const (
@@ -110,6 +112,64 @@ func (n *Node) ComputeHardenedChild(idx uint32) error {
 	copy(n.Code, aux[keySize:])
 
 	return nil
+}
+
+// Child computes a non-hardened child node with the given index.
+// Returns a new Node without mutating the parent.
+// Non-hardened derivation uses the parent's public key in the HMAC computation,
+// enabling extended public key derivation as specified in BIP32.
+// Index must be < 2^31 (non-hardened range).
+func (n *Node) Child(idx uint32) (*Node, error) {
+	// check index is non-hardened
+	if idx >= firstHardened {
+		return nil, errors.New("child index must be < 2^31 for non-hardened derivation")
+	}
+
+	// Derive public key from private key using secp256k1
+	privKey, err := crypto.ToECDSA(n.Key)
+	if err != nil {
+		return nil, err
+	}
+	pubKey := crypto.CompressPubkey(&privKey.PublicKey)
+
+	// convert idx to bytes
+	idxBytes := make([]byte, 4)
+	binary.BigEndian.PutUint32(idxBytes, idx)
+
+	// Generate HMAC-SHA512 with Chain Code as Key
+	h := hmac.New(hasher.SHA2_512.New, n.Code)
+
+	// For non-hardened derivation: Data = serP(public_key) || ser32(index)
+	h.Write(pubKey)
+	h.Write(idxBytes)
+	aux := h.Sum(nil)
+
+	// aux[:32] + parent_key (mod N)
+	keyInt := big.NewInt(0).SetBytes(n.Key)
+	auxInt := big.NewInt(0).SetBytes(aux[:keySize])
+	keyInt.Add(auxInt, keyInt)
+	keyInt.Mod(keyInt, N)
+
+	// validate Private key
+	err = validateKeyNotZero(keyInt)
+	if err != nil {
+		return nil, err
+	}
+
+	// convert to 32-byte slice
+	b := keyInt.Bytes()
+	if len(b) < keySize {
+		extra := make([]byte, keySize-len(b))
+		b = append(extra, b...)
+	}
+
+	// Create new child node
+	childNode := &Node{
+		Key:  b,
+		Code: aux[keySize:],
+	}
+
+	return childNode, nil
 }
 
 // Validate Private Key

@@ -23,6 +23,7 @@ var numWallets uint32
 var numAccounts uint32
 var prefix string
 var derivations uint32
+var singleSeed bool
 
 // Input files flags
 var quantumPhraseFile string
@@ -80,6 +81,7 @@ func init() {
 	rootCmd.PersistentFlags().Uint32VarP(&numAccounts, "num-accounts", "n", 1, "specify the number of accounts to derive for each wallet")
 	rootCmd.PersistentFlags().StringVarP(&prefix, "prefix", "x", "", "derivation path prefix for standard wallet")
 	rootCmd.PersistentFlags().Uint32VarP(&derivations, "derive", "d", 0, "number of accounts to derive from standard wallet. Appended to the prefix")
+	rootCmd.PersistentFlags().BoolVar(&singleSeed, "single-seed", false, "use single-seed generation (one mnemonic, quantum-classical key binding via WOTS-derived index)")
 
 	// Input from file
 	rootCmd.PersistentFlags().StringVar(&quantumPhraseFile, "quantum-file", "", "specify the quantum recovery phrase from a file. Overwrites the value of --quantum")

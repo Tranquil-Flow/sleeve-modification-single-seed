@@ -7,12 +7,15 @@
 package wallet
 
 import (
+	"encoding/binary"
 	"errors"
+	"fmt"
+	"io"
+	"strings"
+
 	"github.com/tyler-smith/go-bip39"
 	"github.com/xx-labs/sleeve/hasher"
 	"github.com/xx-labs/sleeve/wots"
-	"io"
-	"strings"
 )
 
 const EntropySize = 32
@@ -212,4 +215,270 @@ func generateSleeve(secretSeed, publicSeed []byte, params *wots.Params) []byte {
 	// 3. Derive Sleeve secret key and return output
 	secretKey := hasher.SHA3_256.Hash(append([]byte("xx network sleeve"), secretSeed...))
 	return hasher.SHA3_256.Hash(append(secretKey, pk...))
+}
+
+///////////////////////////////////////////////////////////////////////
+// SINGLE-SEED SLEEVE WALLET
+/*
+	SingleSeedSleeve provides an alternative generation method that uses
+	only a single mnemonic phrase instead of generating a second output
+	mnemonic. This improves user experience while maintaining quantum
+	security.
+
+	The WOTS+ public key is used to derive an index value that extends
+	the BIP32 derivation path for each network. This maintains the
+	cryptographic binding between quantum-secure WOTS+ keys and classical
+	ECDSA keys.
+
+	Path structure:
+	- Quantum path: m/44'/1955'/0'/0'/0' (unchanged)
+	- Network paths: m/44'/{coin}'/0'/0/{wots_index}
+	  where {wots_index} = first_4_bytes(SHA3_256(WOTS_PK))
+
+	This approach supports any BIP44-compliant network automatically.
+*/
+
+// Network coin type constants for BIP44 derivation
+const (
+	CoinTypeBitcoin  uint32 = 0
+	CoinTypeEthereum uint32 = 60
+	CoinTypePolkadot uint32 = 354
+	CoinTypeLitecoin uint32 = 2
+	CoinTypeCardano  uint32 = 1815
+)
+
+// NetworkKey represents a derived key for a specific network
+type NetworkKey struct {
+	Network  string // Network name (e.g., "Bitcoin", "Ethereum")
+	CoinType uint32 // BIP44 coin type
+	Path     string // Full derivation path
+	Key      []byte // Derived private key
+}
+
+// SingleSeedSleeve represents a Sleeve wallet using single seed generation
+type SingleSeedSleeve struct {
+	// Input mnemonic: the single phrase users need to backup
+	mnemonic string
+	// WOTS+ keypair for quantum security
+	wotsKey *wots.Key
+	// WOTS+ public key (cached)
+	wotsPK []byte
+	// Derivation index calculated from WOTS public key
+	derivationIndex uint32
+	// Derived network keys
+	networkKeys map[string]*NetworkKey
+}
+
+///////////////////////////////////////////////////////////////////////
+// SINGLE-SEED CONSTRUCTORS
+
+// Create a single-seed sleeve reading entropy from the provided CSPRNG
+func NewSingleSeedSleeve(csprng io.Reader, passphrase string, spec GenSpec) (*SingleSeedSleeve, error) {
+	// 1. Read EntropySize bytes of entropy from csprng
+	ent := make([]byte, EntropySize)
+	if n, err := csprng.Read(ent); n != EntropySize || err != nil {
+		return nil, errors.New("couldn't read enough bytes of entropy from provided reader")
+	}
+
+	// 2. Get sleeve from entropy
+	return NewSingleSeedSleeveFromEntropy(ent, passphrase, spec)
+}
+
+// Create a single-seed sleeve with provided entropy
+func NewSingleSeedSleeveFromEntropy(ent []byte, passphrase string, spec GenSpec) (*SingleSeedSleeve, error) {
+	// 1. Generate BIP39 mnemonic from entropy
+	mnem, err := bip39.NewMnemonic(ent)
+	if err != nil {
+		return nil, err
+	}
+
+	// 2. Validate entropy has required size
+	if len(ent) != EntropySize {
+		return nil, errors.New("provided entropy is of incorrect size")
+	}
+
+	// 3. Get Sleeve from mnemonic
+	return NewSingleSeedSleeveFromMnemonic(mnem, passphrase, spec)
+}
+
+// Create a single-seed sleeve with provided mnemonic and passphrase
+func NewSingleSeedSleeveFromMnemonic(mnemonic, passphrase string, spec GenSpec) (*SingleSeedSleeve, error) {
+	// 1. Validate mnemonic has MnemonicWords words
+	words := strings.Fields(mnemonic)
+	if len(words) != MnemonicWords {
+		return nil, errors.New("mnemonic has invalid number of words")
+	}
+
+	// 2. Generate single-seed sleeve
+	return generateSingleSeedSleeveFromMnemonic(mnemonic, passphrase, spec)
+}
+
+///////////////////////////////////////////////////////////////////////
+// SINGLE-SEED GETTERS
+
+// Get the single mnemonic phrase (only one needed for recovery)
+func (s *SingleSeedSleeve) GetMnemonic() string {
+	return s.mnemonic
+}
+
+// Get the WOTS+ public key (quantum-secure address)
+func (s *SingleSeedSleeve) GetWOTSPublicKey() []byte {
+	return s.wotsPK
+}
+
+// Get the derivation index calculated from WOTS public key
+func (s *SingleSeedSleeve) GetDerivationIndex() uint32 {
+	return s.derivationIndex
+}
+
+// Get a private key for a specific network by name
+func (s *SingleSeedSleeve) GetPrivateKey(network string) ([]byte, error) {
+	key, exists := s.networkKeys[network]
+	if !exists {
+		return nil, fmt.Errorf("network %s not found - call DeriveNetworkKey first", network)
+	}
+	return key.Key, nil
+}
+
+// Get all derived network keys
+func (s *SingleSeedSleeve) GetAllNetworkKeys() map[string]*NetworkKey {
+	return s.networkKeys
+}
+
+// Get the WOTS+ key for signing (if needed in future)
+func (s *SingleSeedSleeve) GetWOTSKey() *wots.Key {
+	return s.wotsKey
+}
+
+///////////////////////////////////////////////////////////////////////
+// NETWORK KEY DERIVATION
+
+// Derive a key for a specific network using its coin type
+func (s *SingleSeedSleeve) DeriveNetworkKey(network string, coinType uint32, seed []byte) error {
+	// Derive to m/44'/{coinType}'/0'/0 using manual BIP32 derivation
+	// ComputeNode is designed for the quantum path (5 hardened elements)
+	// Network paths require 4 hardened + 1 non-hardened element
+
+	// 1. Create master node
+	node, err := NewMasterNode(seed)
+	if err != nil {
+		return fmt.Errorf("failed to create master node: %v", err)
+	}
+
+	// 2. Derive m/44'
+	err = node.ComputeHardenedChild(0x8000002C)
+	if err != nil {
+		return fmt.Errorf("failed to derive purpose: %v", err)
+	}
+
+	// 3. Derive m/44'/{coinType}'
+	err = node.ComputeHardenedChild(coinType | firstHardened)
+	if err != nil {
+		return fmt.Errorf("failed to derive coin type: %v", err)
+	}
+
+	// 4. Derive m/44'/{coinType}'/0'
+	err = node.ComputeHardenedChild(0x80000000)
+	if err != nil {
+		return fmt.Errorf("failed to derive account: %v", err)
+	}
+
+	// 5. Derive m/44'/{coinType}'/0'/0'
+	err = node.ComputeHardenedChild(0x80000000)
+	if err != nil {
+		return fmt.Errorf("failed to derive change: %v", err)
+	}
+
+	// 6. Extend with WOTS-derived index (non-hardened)
+	finalNode, err := node.Child(s.derivationIndex)
+	if err != nil {
+		return fmt.Errorf("failed to derive final key with WOTS index: %v", err)
+	}
+
+	// Store the network key
+	fullPath := fmt.Sprintf("m/44'/%d'/0'/0/%d", coinType, s.derivationIndex)
+	s.networkKeys[network] = &NetworkKey{
+		Network:  network,
+		CoinType: coinType,
+		Path:     fullPath,
+		Key:      finalNode.Key,
+	}
+
+	return nil
+}
+
+// Derive keys for common networks (Bitcoin, Ethereum, Polkadot)
+func (s *SingleSeedSleeve) DeriveStandardNetworks(seed []byte) error {
+	networks := []struct {
+		name     string
+		coinType uint32
+	}{
+		{"Bitcoin", CoinTypeBitcoin},
+		{"Ethereum", CoinTypeEthereum},
+		{"Polkadot", CoinTypePolkadot},
+	}
+
+	for _, net := range networks {
+		if err := s.DeriveNetworkKey(net.name, net.coinType, seed); err != nil {
+			return fmt.Errorf("failed to derive %s key: %v", net.name, err)
+		}
+	}
+
+	return nil
+}
+
+///////////////////////////////////////////////////////////////////////
+// PRIVATE - SINGLE SEED GENERATION
+
+// Generate the single-seed sleeve according to the generation spec
+func generateSingleSeedSleeveFromMnemonic(mnemonic, passphrase string, spec GenSpec) (*SingleSeedSleeve, error) {
+	// 1. Generate seed from mnemonic (validates the mnemonic)
+	seed, err := bip39.NewSeedWithErrorChecking(mnemonic, passphrase)
+	if err != nil {
+		return nil, err
+	}
+
+	// 2. Get path and wots params from GenSpec
+	path, err := spec.PathFromSpec()
+	if err != nil {
+		return nil, err
+	}
+	params := wots.DecodeParams(spec.params)
+	if params == nil {
+		return nil, errors.New("unknown WOTS+ params encoding")
+	}
+
+	// 3. Derive quantum path using BIP32: m/44'/1955'/0'/0'/0'
+	quantumNode, err := ComputeNode(seed, path)
+	if err != nil {
+		return nil, err
+	}
+
+	// 4. Generate WOTS+ keypair (unchanged from original Sleeve)
+	wotsKey := wots.NewKeyFromSeed(params, quantumNode.Key, quantumNode.Code)
+	wotsPK := wotsKey.ComputePK()
+
+	// 5. Calculate derivation index from WOTS public key
+	// Hash the WOTS PK and extract 31 bits to create a deterministic index
+	// that binds the network keys to the quantum-secure WOTS keypair
+	pkHash := hasher.SHA3_256.Hash(wotsPK)
+	// Mask to 31 bits to ensure index < 2^31 (BIP32 non-hardened requirement)
+	derivationIndex := binary.BigEndian.Uint32(pkHash[:4]) & 0x7FFFFFFF
+
+	// 6. Create single-seed sleeve structure
+	sleeve := &SingleSeedSleeve{
+		mnemonic:        mnemonic,
+		wotsKey:         wotsKey,
+		wotsPK:          wotsPK,
+		derivationIndex: derivationIndex,
+		networkKeys:     make(map[string]*NetworkKey),
+	}
+
+	// 7. Automatically derive keys for standard networks
+	err = sleeve.DeriveStandardNetworks(seed)
+	if err != nil {
+		return nil, err
+	}
+
+	return sleeve, nil
 }
