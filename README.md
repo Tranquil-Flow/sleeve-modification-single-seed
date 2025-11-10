@@ -41,40 +41,28 @@ An improved generation method that uses **only one mnemonic phrase** while maint
 
 #### Quick Start: Create a Quantum-Proof Ethereum Wallet
 
-**Want to use MetaMask with quantum security? Here's how:**
+**Generate a wallet with one mnemonic backing everything:**
 
 1. **Generate wallet:**
    ```bash
-   cd sleevage
-   ./bin/sleevage-mac-m1 --single-seed
+   go run tools/generate-wallet.go -mode single
    ```
 
 2. **Back up your 24-word mnemonic** (write it down!)
 
-3. **Get your Ethereum key:**
-   ```bash
-   cd ..
-   go run tools/derive-network.go \
-     -mnemonic "your 24 words here..." \
-     -network "Ethereum" \
-     -cointype 60
-   ```
-
-4. **Import to MetaMask:**
+3. **Import to MetaMask:**
+   - Use the displayed Ethereum private key
    - Open MetaMask → Import Account → Private Key
-   - Paste the private key from step 3
+   - Paste the private key
 
-✅ **Done!** One mnemonic backs up your quantum-secure WOTS+ key AND your Ethereum wallet.
-
-See **[SINGLE_SEED.md](SINGLE_SEED.md)** for complete step-by-step guide with screenshots.
+**Done!** One mnemonic backs up your quantum-secure WOTS+ key AND your Ethereum wallet.
 
 #### Features
 
-- ✅ **One mnemonic** backs up everything (quantum + classical keys)
-- ✅ **Universal:** Works with Bitcoin, Ethereum, Polkadot, and all BIP44 networks
-- ✅ **Quantum-secure:** WOTS+ key cryptographically bound to network keys
-- ✅ **Recoverable:** Deterministic generation from mnemonic
-- ✅ **MetaMask compatible:** Standard Ethereum private keys
+- **One mnemonic** backs up everything (quantum + classical keys)
+- **Universal:** Works with Bitcoin, Ethereum, Polkadot, and all BIP44 networks
+- **Quantum-secure:** WOTS+ key cryptographically bound to network keys
+- **Recoverable:** Deterministic generation from mnemonic
 
 #### Path Structure
 
@@ -86,10 +74,10 @@ See **[SINGLE_SEED.md](SINGLE_SEED.md)** for complete step-by-step guide with sc
 
 ```bash
 # Recover from existing mnemonic
-./sleevage --single-seed --quantum "your 24 word mnemonic phrase"
+go run tools/generate-wallet.go -mode single -mnemonic "your 24 word mnemonic phrase"
 
 # Generate with passphrase (25th word)
-./sleevage --single-seed --pass "your passphrase"
+go run tools/generate-wallet.go -mode single -passphrase "your passphrase"
 
 # Derive Bitcoin key
 go run tools/derive-network.go -mnemonic "..." -network "Bitcoin" -cointype 0
@@ -101,10 +89,62 @@ go run tools/derive-network.go -mnemonic "..." -network "Polkadot" -cointype 354
 go run tools/derive-network.go -list
 ```
 
-#### Documentation
+## Tools
 
-- **[SINGLE_SEED.md](SINGLE_SEED.md)** - Complete user guide with step-by-step instructions
-- **[tools/README.md](tools/README.md)** - Network derivation tool documentation
+Sleeve includes helper tools for wallet generation and network key derivation:
+
+### generate-wallet.go
+
+A comprehensive wallet generator supporting both single-seed and dual-seed modes.
+
+**Features:**
+- Generate new wallets or recover from mnemonic
+- Single-seed mode: One mnemonic backs up everything
+- Dual-seed mode: Legacy two-mnemonic system
+- Automatic export of Ethereum, Bitcoin, and Polkadot keys
+- Support for BIP39 passphrases
+
+**Usage:**
+```bash
+# Generate single-seed wallet
+go run tools/generate-wallet.go -mode single
+
+# Generate dual-seed wallet
+go run tools/generate-wallet.go -mode dual
+
+# Recover from mnemonic
+go run tools/generate-wallet.go -mode single -mnemonic "your 24 words..."
+
+# With passphrase
+go run tools/generate-wallet.go -mode single -passphrase "secret"
+```
+
+### derive-network.go
+
+Derive keys for any BIP44-compatible network from your Sleeve mnemonic.
+
+**Features:**
+- Support for any BIP44 network (Solana, Litecoin, Cosmos, etc.)
+- Multiple output formats (hex, WIF, addresses)
+- Built-in list of common network coin types
+- Deterministic key derivation
+
+**Usage:**
+```bash
+# Derive Solana key
+go run tools/derive-network.go -mnemonic "your 24 words..." -network "Solana" -cointype 501
+
+# Derive Litecoin key
+go run tools/derive-network.go -mnemonic "your 24 words..." -network "Litecoin" -cointype 2
+
+# List supported networks
+go run tools/derive-network.go -list
+
+# Show help
+go run tools/derive-network.go -help
+```
+
+See **[tools/README.md](tools/README.md)** for detailed documentation.
 
 ## References
 
