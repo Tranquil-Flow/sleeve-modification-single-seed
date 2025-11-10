@@ -306,17 +306,16 @@ func printInstructions(singleSeed bool) {
 
 	fmt.Println("🔄 RECOVERY:")
 	if singleSeed {
-		fmt.Println("   • Run: go run generate-wallet.go -mode single -mnemonic \"your words\"")
+		fmt.Println("   • Run: go run tools/generate-wallet.go -mode single -mnemonic \"your words\"")
 	} else {
-		fmt.Println("   • Run: go run generate-wallet.go -mode dual -mnemonic \"your quantum words\"")
+		fmt.Println("   • Run: go run tools/generate-wallet.go -mode dual -mnemonic \"your quantum words\"")
 	}
 	fmt.Println("   • You'll get back the exact same keys")
 	fmt.Println()
 
 	fmt.Println("📚 MORE INFO:")
-	fmt.Println("   • Technical docs: SINGLE_SEED.md")
-	fmt.Println("   • Security analysis: SECURITY_ANALYSIS.md")
-	fmt.Println("   • Export guide: EXPORT_KEYS.md")
+	fmt.Println("   • See README.md for detailed documentation")
+	fmt.Println("   • Network derivation: tools/README.md")
 	fmt.Println()
 
 	fmt.Println("═══════════════════════════════════════════════════════════════")

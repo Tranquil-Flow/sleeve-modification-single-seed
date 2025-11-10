@@ -113,7 +113,7 @@ fi
 echo -e "${YELLOW}⏳ Generating wallet...${NC}"
 echo ""
 
-eval "go run generate-wallet.go $ARGS"
+eval "go run tools/generate-wallet.go $ARGS"
 
 # Success message
 echo -e "${GREEN}✅ Wallet generated successfully!${NC}"
